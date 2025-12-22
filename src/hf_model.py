@@ -19,7 +19,8 @@ class HFModel(ModelInterface):
         self.tokenizer = AutoTokenizer.from_pretrained(
             MODEL_NAME,
             use_fast=False,
-            trust_remote_code=True
+            trust_remote_code=True,
+            legacy=True
         )
 
         if self.tokenizer.pad_token is None:
