@@ -11,34 +11,39 @@ class HFModel(ModelInterface):
         """
         Hugging Face causal LM wrapper.
 
-        - Supports CPU (local) and CUDA (Colab)
-        - Supports models with custom HF code (e.g. HuatuoGPT)
+        Design goals:
+        - Model-agnostic
+        - Works on CPU (local) and CUDA (Colab)
+        - No custom tokenizer / remote code assumptions
         """
 
-        # --- Tokenizer ---
+        # -------------------------
+        # Tokenizer
+        # -------------------------
         self.tokenizer = AutoTokenizer.from_pretrained(
             MODEL_NAME,
-            use_fast=False,
-            trust_remote_code=True,
-            legacy=True
+            use_fast=True
         )
 
+        # Ensure pad token exists (required for generation)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        # --- Model ---
+        # -------------------------
+        # Model
+        # -------------------------
         if DEVICE == "cuda":
+            # Colab / GPU path
             self.model = AutoModelForCausalLM.from_pretrained(
                 MODEL_NAME,
                 torch_dtype=torch.float16,
-                device_map="auto",
-                trust_remote_code=True
+                device_map="auto"
             )
         else:
+            # Local / CPU path
             self.model = AutoModelForCausalLM.from_pretrained(
                 MODEL_NAME,
-                torch_dtype=torch.float32,
-                trust_remote_code=True
+                torch_dtype=torch.float32
             ).to("cpu")
 
         self.model.eval()
@@ -81,7 +86,7 @@ class HFModel(ModelInterface):
 
         completions = []
         for seq in outputs:
-            gen_ids = seq[prompt_len:]  # slice by token length (CRITICAL)
+            gen_ids = seq[prompt_len:]  # slice by token length
             text = self.tokenizer.decode(gen_ids, skip_special_tokens=True)
             completions.append(text.strip())
 
@@ -91,10 +96,7 @@ class HFModel(ModelInterface):
     def logprob(self, prompt: str, completion: str) -> float:
         """
         Compute log P(completion | prompt).
-
-        This is used by:
-        - DPO (best vs worst comparison)
-        - Reference model comparisons
+        Used for DPO and GRPO.
         """
 
         prompt_ids = self.tokenizer(
@@ -112,7 +114,7 @@ class HFModel(ModelInterface):
         outputs = self.model(full_ids)
         logits = outputs.logits
 
-        # Standard causal LM shift
+        # Causal LM shift
         shift_logits = logits[:, :-1, :]
         shift_labels = full_ids[:, 1:]
 
@@ -135,7 +137,7 @@ class HFModel(ModelInterface):
 
 
 if __name__ == "__main__":
-    # Quick sanity test (local CPU only)
+    # Sanity check
     model = HFModel()
 
     prompt = (
