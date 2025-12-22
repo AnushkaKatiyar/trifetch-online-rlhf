@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# Hugging Face / caches
+hf_cache/
+.cache/
+~/.cache/
+
+# Outputs
+data/verified_traces.json
+
+# Environments
+.venv/
+.env
