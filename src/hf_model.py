@@ -8,18 +8,38 @@ from src.config import MODEL_NAME, DEVICE
 
 class HFModel(ModelInterface):
     def __init__(self):
+        """
+        Hugging Face causal LM wrapper.
+
+        - Supports CPU (local) and CUDA (Colab)
+        - Supports models with custom HF code (e.g. HuatuoGPT)
+        """
+
+        # --- Tokenizer ---
         self.tokenizer = AutoTokenizer.from_pretrained(
             MODEL_NAME,
-            use_fast=True
+            use_fast=True,
+            trust_remote_code=True
         )
 
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        self.model = AutoModelForCausalLM.from_pretrained(
-            MODEL_NAME,
-            torch_dtype=torch.float32
-        ).to("cpu")
+        # --- Model ---
+        if DEVICE == "cuda":
+            self.model = AutoModelForCausalLM.from_pretrained(
+                MODEL_NAME,
+                torch_dtype=torch.float16,
+                device_map="auto",
+                trust_remote_code=True
+            )
+        else:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                MODEL_NAME,
+                torch_dtype=torch.float32,
+                trust_remote_code=True
+            ).to("cpu")
+
         self.model.eval()
 
     @torch.no_grad()
@@ -31,8 +51,11 @@ class HFModel(ModelInterface):
         top_p: float = 0.9,
         max_new_tokens: int = 512,
     ) -> List[str]:
+        """
+        Sample n completions from the model.
+        Returns ONLY the generated completion (prompt removed).
+        """
 
-        # Tokenize prompt
         inputs = self.tokenizer(
             prompt,
             return_tensors="pt",
@@ -44,7 +67,6 @@ class HFModel(ModelInterface):
 
         prompt_len = input_ids.shape[1]
 
-        # Generate
         outputs = self.model.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -56,23 +78,24 @@ class HFModel(ModelInterface):
             pad_token_id=self.tokenizer.eos_token_id,
         )
 
-        decoded = []
+        completions = []
         for seq in outputs:
-            gen_ids = seq[prompt_len:]  # only newly generated tokens
+            gen_ids = seq[prompt_len:]  # slice by token length (CRITICAL)
             text = self.tokenizer.decode(gen_ids, skip_special_tokens=True)
-            decoded.append(text.strip())
+            completions.append(text.strip())
 
-        return decoded
-
-
+        return completions
 
     @torch.no_grad()
     def logprob(self, prompt: str, completion: str) -> float:
         """
-        Compute log P(completion | prompt)
+        Compute log P(completion | prompt).
+
+        This is used by:
+        - DPO (best vs worst comparison)
+        - Reference model comparisons
         """
 
-        # Tokenize prompt and full sequence separately
         prompt_ids = self.tokenizer(
             prompt,
             return_tensors="pt",
@@ -85,19 +108,17 @@ class HFModel(ModelInterface):
             add_special_tokens=False
         )["input_ids"].to(self.model.device)
 
-        # Forward pass
         outputs = self.model(full_ids)
         logits = outputs.logits
 
-        # Shift logits and labels for causal LM
+        # Standard causal LM shift
         shift_logits = logits[:, :-1, :]
         shift_labels = full_ids[:, 1:]
 
-        # We only want completion tokens
         completion_start = prompt_ids.shape[1]
 
-        completion_logits = shift_logits[:, completion_start - 1:, :]
-        completion_labels = shift_labels[:, completion_start - 1:]
+        completion_logits = shift_logits[:, completion_start - 1 :, :]
+        completion_labels = shift_labels[:, completion_start - 1 :]
 
         log_probs = torch.nn.functional.log_softmax(
             completion_logits,
@@ -111,13 +132,18 @@ class HFModel(ModelInterface):
 
         return token_logprobs.sum().item()
 
+
 if __name__ == "__main__":
+    # Quick sanity test (local CPU only)
     model = HFModel()
 
-    prompt = "Answer with A, B, C, or D.\nWhat is 2+2?\nA) 3\nB) 4\nC) 5\nD) 6\n\nFINAL ANSWER:\n"
+    prompt = (
+        "Answer with A, B, C, or D.\n"
+        "What is 2+2?\n"
+        "A) 3\nB) 4\nC) 5\nD) 6\n\n"
+        "FINAL ANSWER:\n"
+    )
     completion = '{"final_answer":"B"}'
 
     lp = model.logprob(prompt, completion)
     print("Log-prob:", lp)
-    
-
