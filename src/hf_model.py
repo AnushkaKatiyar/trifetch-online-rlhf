@@ -18,7 +18,7 @@ class HFModel(ModelInterface):
         # --- Tokenizer ---
         self.tokenizer = AutoTokenizer.from_pretrained(
             MODEL_NAME,
-            use_fast=True,
+            use_fast=False,
             trust_remote_code=True
         )
 
