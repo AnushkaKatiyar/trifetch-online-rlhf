@@ -13,3 +13,6 @@ data/verified_traces.json
 # Environments
 .venv/
 .env
+
+.vscode/
+*.ipynb
