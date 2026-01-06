@@ -96,11 +96,28 @@ def main():
 
 
             # Generate a small batch each attempt for speed
+            # --- adaptive decoding ---
+            rescue_mode = (attempts >= 15 and len(verified) == 0)
+
+            if rescue_mode:
+                temperature = 0.15
+                top_p = 0.9
+                if attempts == 15:  # print only once
+                    print(f"[{sample_id}] switching to low-temp rescue mode")
+            elif len(verified) == 0:
+                # exploration
+                temperature = TEMPERATURE
+                top_p = TOP_P
+            else:
+                # exploitation
+                temperature = 0.2
+                top_p = 0.95
+
             outs = model.generate(
                 prompt,
                 n=N_CANDIDATES_PER_BATCH,
-                temperature=TEMPERATURE,
-                top_p=TOP_P,
+                temperature=temperature,
+                top_p=top_p,
                 max_new_tokens=MAX_NEW_TOKENS,
             )
 
